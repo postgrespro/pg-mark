@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -e
+
+BMDIR=$(ls -d resources/benchmarksql/benchmarksql*)
+[ -n "$BMDIR" ] || exit 2
+SD=$(pwd)
+BM_MINS=3
+
+createdb benchmarksql
+cp -r "$BMDIR" src/benchmarksql
+cd src/benchmarksql/run
+cp props.pg postgres.properties
+sed -i -e 's|^\(conn=jdbc:postgresql:\).*$|\1//localhost:5432/benchmarksql|' postgres.properties
+sed -i -e 's|^\(user\)=benchmarksql$|\1=postgres|' postgres.properties
+sed -i -e 's|^\(password\)=.*$|\1=pgpass|' postgres.properties
+
+sed -i -e 's|^\(warehouses\)=.*$|\1=10|' postgres.properties
+sed -i -e 's|^\(terminals\)=.*$|\1=5|' postgres.properties
+sed -i -e 's|^\(runTxnsPerTerminal\)=.*$|\1=0|' postgres.properties
+sed -i -e "s|^\(runMins\)=.*$||" postgres.properties
+sed -i -e "s|^\(limitTxnsPerMin\)=.*$|\1=0\nrunMins=$BM_MINS|" postgres.properties
+
+sed -i -e "s|^\(resultDirectory\)=.*$|\1=$SD/results/benchmarksql|" postgres.properties
+sed -i -e "s#^\(osCollectorScript\|osCollectorInterval\|osCollectorDevices\)=#//\1=#" postgres.properties
+./runDatabaseBuild.sh postgres.properties

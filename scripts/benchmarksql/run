@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -e
+
+cd src/benchmarksql/run
+./runBenchmark.sh postgres.properties
+
+DATADIR=$(psql -Aqt -c 'SHOW data_directory')
+data_size=$(du -s "$DATADIR" | cut -f 1)
+echo "DATA SIZE: $data_size"

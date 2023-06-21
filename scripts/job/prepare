@@ -1,0 +1,108 @@
+#!/bin/bash
+set -e
+
+HD="$(pwd)"
+if [ ! -d resources/job-imdb ]; then
+wget https://bootstrap.pypa.io/pip/2.7/get-pip.py
+python2 get-pip.py
+#sudo apt install python-dev
+
+python2 -m pip install git+https://github.com/cinemagoer/cinemagoer@5.2
+# Newer versions fail on processing 'tv special' and/or on first flushing of MoviesCache due to transaction abort
+
+python2 -m pip install psycopg2
+
+psql_path=$(readlink -f "$(which psql)")
+LD_LIBRARY_PATH=$(dirname "$psql_path")/../lib
+export LD_LIBRARY_PATH
+
+mkdir imdb
+wget -nv -P imdb ftp://ftp.fu-berlin.de/misc/movies/database/frozendata/*.gz
+(
+# Fix some broken titles
+cd imdb;
+gzip -d -c aka-titles.list.gz | sed '
+s/"Nuria en el Nueve""/"Nuria en el Nueve"/;
+s/"Iron Man Tiger 7""/"Iron Man Tiger 7"/;
+s/(M) (2013)/"M" (2013)/;
+s/The "C" Team/The “C” Team/;
+s/Say "I Love You"/Say “I Love You”/;
+s/Are you tough enough?" "/Are you tough enough? - /;
+s/"Christian Frates\x27 Adult Swim Impressions" AKA //;
+s/Operation "Typhoon/Operation “Typhoon”/;
+/aka Target Scorpion/d;
+/aka Jugando con la muerte II/d;' | gzip -c >aka-titles.list.fixed.gz
+mv aka-titles.list.gz aka-titles.list.gz.bak
+mv aka-titles.list.fixed.gz aka-titles.list.gz
+# ^^^ To fix: WARNING AkasMoviesCache._toDB() invalid title: "Nuria en el Nueve"" (1987) and
+# ERROR caught exception creating a foreign key: insert or update on table "aka_title" violates foreign key constraint "movie_id_exists"
+# DETAIL:  Key (movie_id)=(0) is not present in table "title".
+
+gzip -d -c movie-links.list.gz | sed -e '16,870d' | sed -E '/\((version of|follows|followed by|featured in|referenced in|edited into|alternate language version of) \)/d' | gzip -c >movie-links.list.fixed.gz
+mv movie-links.list.gz movie-links.list.gz.bak
+mv movie-links.list.fixed.gz movie-links.list.gz
+# ^^^ movie-links.list.txt contains invalid title ""
+# Ôdîn - Kôshi hobune stâraito (1985)
+#  (alternate language version of )
+# and so on,,,
+# which causes
+# IMDbParserError exception raised; args: ('invalid title: ""',); kwds: {}
+# and then
+# ERROR caught exception creating a foreign key: insert or update on table "movie_link" violates foreign key constraint "linked_movie_id_exists"
+# DETAIL:  Key (linked_movie_id)=(4730106) is not present in table "title".
+)
+
+createdb imdbload
+python2 .local/bin/imdbpy2sql.py -d imdb  -u postgresql://postgres:postgres@localhost/imdbload
+mkdir resources/job-imdb
+cd resources/job-imdb
+pg_dump -d imdbload -Cs -f schema+.sql
+cat << 'EOF' | psql -d imdbload
+\copy aka_name to 'aka_name.csv' csv
+\copy aka_title to 'aka_title.csv' csv
+\copy cast_info to 'cast_info.csv' csv
+\copy char_name to 'char_name.csv' csv
+\copy comp_cast_type to 'comp_cast_type.csv' csv
+\copy company_name to 'company_name.csv' csv
+\copy company_type to 'company_type.csv' csv
+\copy complete_cast to 'complete_cast.csv' csv
+\copy info_type to 'info_type.csv' csv
+\copy keyword to 'keyword.csv' csv
+\copy kind_type to 'kind_type.csv' csv
+\copy link_type to 'link_type.csv' csv
+\copy movie_companies to 'movie_companies.csv' csv
+\copy movie_info to 'movie_info.csv' csv
+\copy movie_info_idx to 'movie_info_idx.csv' csv
+\copy movie_keyword to 'movie_keyword.csv' csv
+\copy movie_link to 'movie_link.csv' csv
+\copy name to 'name.csv' csv
+\copy person_info to 'person_info.csv' csv
+\copy role_type to 'role_type.csv' csv
+\copy title to 'title.csv' csv
+EOF
+for f in *.csv; do echo "$f"; xz -k -z -9 -e "$f"; done;
+
+else
+date
+echo "Creating schema..."
+createdb imdbload
+schema="$HD/resources/job/schema.sql"
+[ -f "$HD/resources/job-imdb/schema.sql" ] && schema="$HD/resources/job-imdb/schema.sql"
+psql -d imdbload -f "$schema"
+cd "$HD/resources/job-imdb"
+dst=$(readlink -f "$HD/data.csv")
+date
+echo "Loading data..."
+for t in role_type comp_cast_type info_type kind_type company_type link_type char_name company_name name aka_name title keyword movie_info movie_info_idx movie_companies aka_title movie_link movie_keyword person_info complete_cast cast_info; do
+  xz -d -c "$t.csv.xz" >"$dst"
+  psql -d imdbload -c "\copy $t from '$dst' csv"
+done
+date
+echo "Creating indexes..."
+fkindexes="$HD/resources/job/fkindexes.sql"
+[ -f "$HD/resources/job-imdb/fkindexes.sql" ] && fkindexes="$HD/resources/job-imdb/fkindexes.sql"
+psql -d imdbload -f "$fkindexes"
+psql -d imdbload -c "ANALYZE VERBOSE"
+date
+echo "Done."
+fi

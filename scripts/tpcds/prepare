@@ -1,0 +1,70 @@
+#!/bin/bash
+
+set -e
+
+SCALE=$1
+[ -z "$SCALE" ] && SCALE=1
+TMPDIR=/var/lib/postgresql/tmp/
+DATADIR=$(psql -Aqt -c 'SHOW data_directory;')
+
+SD=$(pwd)
+mkdir src/tpcds
+cp -r --preserve=timestamps resources/tpcds/*/* src/tpcds/
+cd src/tpcds/tools
+CPPFLAGS="-fcommon" make
+mkdir $TMPDIR
+./dsdgen -SCALE $SCALE -TERMINATE N -DIR $TMPDIR
+
+# Generate queries with the template number
+mkdir /tmp/templates
+cp "$SD/resources/tpcds-tooling/templates"/* /tmp/templates/
+sed -i '1s|^|Define ECHO = "\\echo >>"; [ECHO] [_TEMPLATE];\n|' /tmp/templates/query*.tpl
+./dsqgen -SCALE $SCALE -INPUT /tmp/templates/templates-compat.lst -DIRECTORY /tmp/templates/ -DIALECT postgres
+[ -f query_0.sql ] || exit 1
+
+cd "$SD"
+# Based on https://blog.pgaddict.com/file/tpcds-tooling.tgz / run-tpcds.sh
+
+createdb tpcds
+psql tpcds < resources/tpcds-tooling/ddl/tables.sql
+
+echo "  loading data"
+sed -e "s|/mnt/data/tpcds/data/|$TMPDIR|" resources/tpcds-tooling/ddl/load.sql >/tmp/load.sql
+sed 's/\xd4/Ô/; s/\xc9/É/' -i /var/lib/postgresql/tmp/customer.dat # Convert 'Ô' in "CÔTE D'IVOIRE" and 'É' in "RÉUNION" to UTF-8
+/usr/bin/time -f '%e' -o time.tmp psql -v ON_ERROR_STOP=1 tpcds -f /tmp/load.sql
+time_a=$(cat time.tmp)
+size_a=$(du -s "$DATADIR" | cut -f 1)
+
+echo "  creating indexes"
+/usr/bin/time -f '%e' -o time.tmp psql -v ON_ERROR_STOP=1 tpcds -f resources/tpcds-tooling/ddl/indexes.sql
+
+time_b=$(cat time.tmp)
+size_b=$(du -s "$DATADIR" | cut -f 1)
+
+echo "  vacuum full"
+/usr/bin/time -f '%e' -o time.tmp psql tpcds -c "vacuum full" > /dev/null 2>&1
+
+time_c=$(cat time.tmp)
+size_c=$(du -s "$DATADIR" | cut -f 1)
+
+echo "  vacuum freeze"
+/usr/bin/time -f '%e' -o time.tmp psql tpcds -c "vacuum freeze" > /dev/null 2>&1
+
+time_d=$(cat time.tmp)
+size_d=$(du -s "$DATADIR" | cut -f 1)
+
+echo "  analyze"
+/usr/bin/time -f '%e' -o time.tmp psql tpcds -c "analyze" > /dev/null 2>&1
+
+time_e=$(cat time.tmp)
+
+echo "LOAD TIME: $time_a
+INDEXES TIME: $time_b
+VACUUM FULL TIME: $time_c
+VACUUM FREEZE TIME: $time_d
+ANALYZE TIME: $time_e" >> results/times.log
+
+echo "LOAD SIZE: $size_a
+INDEXES SIZE: $size_b
+VACUUM FULL SIZE: $size_c
+VACUUM FREEZE SIZE: $size_d" >> results/sizes.log

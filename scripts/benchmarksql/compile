@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -e
+
+SOURCEDIR=$1
+[ -n "$SOURCEDIR" ] || SOURCEDIR="resources/benchmarksql"
+cd $SOURCEDIR
+BMDIR=$(ls -d benchmarksql*)
+[ -n "$BMDIR" ] || exit 2
+cd "$BMDIR"
+ant -Dant.build.javac.target=1.7 -Dant.build.javac.source=1.7

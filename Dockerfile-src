@@ -1,0 +1,114 @@
+FROM ubuntu
+ARG PG_VERSION
+ARG PHASE1_ACTION
+ARG PHASE2_ACTION
+ARG REPOSITORY
+ARG EXTRA_OS_PACKAGES
+ARG EXTRA_SRC_GIT
+ARG EXTRA_PG_MODULES
+ARG PG_PARAMETERS
+ARG CFG_OPTIONS
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install a common set of packages needed for tests
+#  There are some warnings (in red) that show up during the build. You can hide
+#  them by prefixing each apt statement with DEBIAN_FRONTEND=noninteractive
+RUN p=$EXTRA_OS_PACKAGES; p="${p%\"}";p="${p#\"}"; \
+    apt update && apt install -y $p python3 python3-dev python3-pip \
+    software-properties-common wget vim time pkg-config locales recode \
+    git gcc make libreadline-dev zlib1g-dev libicu-dev bison flex gettext \
+    openjdk-17-jdk maven
+
+RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+ENV LANG en_US.UTF-8
+ENV LC_ALL en_US.UTF-8
+
+COPY ./$PHASE1_ACTION /bin/
+RUN $PHASE1_ACTION
+
+RUN useradd -m postgres
+
+WORKDIR /home/postgres
+
+ADD postgres.tar.gz /home/postgres/src/postgres
+ADD postgres-pgbench.tar.gz /home/postgres/src/postgres-pgbench
+RUN chown -R postgres:postgres /home/postgres/
+
+# Setup jdbc driver
+RUN JAVA_VERSION=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}'); \
+    case "$JAVA_VERSION" in \
+        1\.6* ) jdbcjar="https://jdbc.postgresql.org/download/postgresql-42.2.12.jre6.jar" ;; \
+        1\.7* ) jdbcjar="https://jdbc.postgresql.org/download/postgresql-42.2.12.jre7.jar" ;; \
+        *) jdbcjar="https://jdbc.postgresql.org/download/postgresql-42.2.12.jar" ;; \
+    esac; \
+    [ -z "$jdbcjar" ] || wget --no-verbose "$jdbcjar" -P /usr/share/java
+
+USER postgres
+
+RUN o=$CFG_OPTIONS; o="${o%\"}";o="${o#\"}"; \
+    cd ~/src/postgres && ./configure -q $o && \
+    make -s -j8 && make -s -j8 -C contrib
+
+USER root
+
+RUN cd /home/postgres/src/postgres && make -s install && \
+    make -s install -C contrib && \
+    mkdir -p /var/lib/postgresql/main && chown -R postgres:postgres /var/lib/postgresql
+
+ENV PATH "$PATH:/usr/local/pgsql/bin"
+
+RUN echo "/usr/local/pgsql/bin/postgres -D /var/lib/postgresql/main -c config_file=/var/lib/postgresql/main/postgresql.conf" >/usr/bin/pgmain && chmod a+x /usr/bin/pgmain
+
+COPY ./$PHASE2_ACTION /bin/
+RUN $PHASE2_ACTION
+
+# Build and install extra module if needed
+USER postgres
+
+RUN if [ ! -z "$EXTRA_SRC_GIT" ]; then \
+    mkdir -p /home/postgres/src && cd /home/postgres/src && git clone --depth 1 $EXTRA_SRC_GIT extra && \
+    cd extra && make USE_PGXS=1; \
+fi
+
+USER root
+
+RUN if [ -d /home/postgres/src/extra ]; then cd /home/postgres/src/extra && make install USE_PGXS=1; fi
+
+USER postgres
+
+RUN /usr/local/pgsql/bin/initdb -D /var/lib/postgresql/main -k
+
+RUN touch /home/postgres/extra.conf && printf "\nlisten_addresses='*'\n"\
+"logging_collector = on\n"\
+"fsync = off\n"\
+"max_connections = 500\n"\
+"include '/home/postgres/extra.conf'\n" >> /var/lib/postgresql/main/postgresql.conf
+# log_statement = all
+# log_min_messages = info
+RUN m=$EXTRA_PG_MODULES; m="${m%\"}";m="${m#\"}"; \
+    [ ! -z "$m" ] || printf "\nshared_preload_libraries = '"$m"'\n" >> /var/lib/postgresql/main/postgresql.conf
+RUN p=$PG_PARAMETERS; p="${p%\"}"; p="${p#\"}"; \
+    [ -z "$p" ] || printf "\n$p\n" >> /var/lib/postgresql/main/postgresql.conf
+
+RUN printf "\n"\
+"host    all             all             127.0.0.1/32          trust\n"\
+"host    all             all                0.0.0.0/0            md5\n"\
+"host    all             all                  ::1/128          trust\n" >> /var/lib/postgresql/main/pg_hba.conf
+
+RUN /usr/local/pgsql/bin/pg_ctl -w -D /var/lib/postgresql/main start && /usr/local/pgsql/bin/createdb || true # 8.0 doesn't create the postgres DB automatically
+
+RUN sleep 5; /usr/local/pgsql/bin/pg_ctl -w -D /var/lib/postgresql/main start && \
+    psql -c "CREATE USER tester WITH SUPERUSER PASSWORD 'tester'; ALTER user postgres password 'pgpass';"
+
+COPY ./setup-reference-pgbench /tmp/
+RUN /tmp/setup-reference-pgbench $PG_VERSION
+
+# Expose the PostgreSQL port
+EXPOSE 5432
+
+# Add VOLUMEs to allow backup of config, logs and databases
+VOLUME  ["/var/lib/postgresql"]
+
+# Set the default command to run when starting the container
+CMD /usr/bin/pgmain

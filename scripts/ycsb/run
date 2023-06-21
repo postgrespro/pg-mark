@@ -1,0 +1,76 @@
+#!/bin/bash
+
+set -e
+
+JAVA_VERSION=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}')
+case "$JAVA_VERSION" in
+    1\.6* ) echo > results/ycsb-run.log;
+            exit 0 ;; #  com/yahoo/ycsb/Client : Unsupported major.minor version 51.0
+esac
+
+RECORDCOUNT=$1 # 100000
+OPERATIONCOUNT=$2 # 10
+WORKLOADS=$3 # "a b c d f"
+THREADS=$4 # "50 25 10"
+
+DATADIR=$(psql -Aqt -c 'SHOW data_directory;')
+
+cat > /tmp/postgres.properties <<EOF
+db.driver=org.postgresql.Driver
+# jdbc.fetchsize=20
+db.url=jdbc:postgresql:ycsb
+db.user=postgres
+EOF
+
+HD="$(pwd)"
+cp -r resources/YCSB/ycsb-jdbc-binding-* "$HD/ycsb"
+YCSBHOME="$HD/ycsb"
+echo "CLASSPATH=$(ls /usr/share/java/postgres*.jar)" >"$YCSBHOME/bin/setenv.sh"
+
+for wl in $WORKLOADS; do
+    for th in $THREADS; do
+        if [ "$wl" = "d" ] || [ ! -f "results/ycsb-${wl}-load.log" ]; then
+            # workload d performs INSERTs, so we need fresh data for every run
+            dropdb ycsb || true
+
+            createdb ycsb
+            echo "
+CREATE TABLE usertable (
+	YCSB_KEY VARCHAR(255) PRIMARY KEY,
+	FIELD0 TEXT, FIELD1 TEXT,
+	FIELD2 TEXT, FIELD3 TEXT,
+	FIELD4 TEXT, FIELD5 TEXT,
+	FIELD6 TEXT, FIELD7 TEXT,
+	FIELD8 TEXT, FIELD9 TEXT
+);" | psql ycsb
+
+            /usr/bin/time -f '%e' -o time.tmp \
+            "$YCSBHOME/bin/ycsb.sh" load jdbc \
+            -s -P "$YCSBHOME/workloads/workload$wl" -P /tmp/postgres.properties \
+            -p recordcount="$RECORDCOUNT" -p operationcount="$OPERATIONCOUNT" \
+            >> "results/ycsb-${wl}-load.log" 2>&1
+            if [ ! -f "time-${wl}.tmp" ]; then
+                cp time.tmp "time-${wl}.tmp"
+                size_l=$(du -s "$DATADIR" | cut -f 1)
+                time_l=$(cat time.tmp)
+                echo "LOAD $wl SIZE: $size_l"          >> results/ycsb-run.log
+                echo "LOAD $wl TIME: $time_l"          >> results/ycsb-run.log
+            fi
+        fi
+
+        DTSTART=$(date -Iseconds)
+        echo "Workload $wl with $th threads started at $DTSTART... "
+
+        "${YCSBHOME}/bin/ycsb.sh" run jdbc \
+        -s -P "${YCSBHOME}/workloads/workload$wl" -P /tmp/postgres.properties \
+        -p recordcount="$RECORDCOUNT" -p operationcount="$OPERATIONCOUNT" \
+        -threads "$th" >> "results/ycsb-${wl}-run-${th}.log" 2>&1
+
+        DTEND=$(date -Iseconds)
+        echo "Workload $wl with $th threads completed at $DTEND. "
+        echo "ycsbrun,$wl,$th,$DTSTART,$DTEND" >> results/ycsbtest.log
+
+        echo ">>load $wl $th" >> results/ycsb-run.log
+        grep '\[OVERALL\],' "results/ycsb-${wl}-run-${th}.log" >> results/ycsb-run.log
+    done
+done

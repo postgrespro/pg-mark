@@ -1,0 +1,60 @@
+#!/bin/bash
+set -e
+
+cp -r resources/gdprbench gdprbench
+cd gdprbench/src
+
+mvn --version
+
+# Use jdbc; disable checkstyle
+sed -e 's|\(</redis.version>\)|\1<openjpa.jdbc.version>2.1.1</openjpa.jdbc.version>|' \
+ -e 's|\(<module>redis</module>\)|\1<module>jdbc</module>|' \
+ -e 's|<phase>validate</phase>|<phase>none</phase>|' -i pom.xml
+
+# Use jdbc
+# shellcheck disable=SC2016
+sed -e 's|\(</dependencies>\)|<dependency><groupId>com.yahoo.ycsb</groupId><artifactId>jdbc-binding</artifactId><version>${project.version}</version></dependency>\n\1|' -i distribution/pom.xml
+
+# Fix broken JdbcDBClient.java
+echo '
+@@ -25,4 +25,5 @@ import com.yahoo.ycsb.StringByteIterator;
+ import java.sql.*;
+ import java.util.*;
++import java.io.*;
+ import java.util.concurrent.ConcurrentHashMap;
+ import java.util.concurrent.ConcurrentMap;
+@@ -360,9 +361,9 @@ public class JdbcDBClient extends DB {
+   public Status readLog(String table, int logcount){
+     try {
+-      String s = null
++      String s = null;
+       String query = null;
+       Process p = null;
+       query = "tail -n " + logcount + " /home/audit_logs/audit_dump.xm";
+-      Process p = Runtime.getRuntime().exec(query);
++      if (p == null) return Status.OK; // /home/audit_logs/audit_dump.xm is an unknown file - it could not be read
+       BufferedReader stdInput = new BufferedReader(new
+            InputStreamReader(p.getInputStream()));
+@@ -626,5 +627,5 @@ public class JdbcDBClient extends DB {
+   public Status insertTTL(String table, String key,
+                          Map<String, ByteIterator> values, int ttl) {
+-   return Status.OK;
++    return this.insert(table, key, values);
+   }
+ }
+' | patch ./jdbc/src/main/java/com/yahoo/ycsb/db/JdbcDBClient.java
+
+# Use fieldnames field1..field10
+sed -e 's|\(fieldnames.add("\)|//\1|' \
+ -e 's|//fieldnames.add(fieldnameprefix + i);|fieldnames.add("field" + Long.toString(i));|' \
+ -i core/src/main/java/com/yahoo/ycsb/workloads/GDPRWorkload.java
+
+mvn -Psource-run -pl com.yahoo.ycsb:jdbc-binding -am package -DskipTests # from bin/ycsb.sh
+
+# configure workloads/gdpr_*
+cat > /tmp/postgres.properties <<EOF
+db.driver=org.postgresql.Driver
+# jdbc.fetchsize=20
+db.url=jdbc:postgresql:gdpr
+db.user=postgres
+EOF

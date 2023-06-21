@@ -1,0 +1,60 @@
+#!/bin/bash
+set -e
+
+mkdir imdb
+(cd imdb
+wget -nv ftp://ftp.fu-berlin.de/misc/movies/database/frozendata/*.gz
+#wget -nv ftp://ftp.fu-berlin.de/misc/movies/database/frozendata/movies.list.gz
+)
+createdb imdbload
+#wget https://bootstrap.pypa.io/pip/2.7/get-pip.py
+#python2 get-pip.py
+#python2 -m pip install git+https://github.com/cinemagoer/cinemagoer@imdbpy-legacy # Newer versions fail on processing 'tv special'
+
+python3 -m pip install git+https://github.com/cinemagoer/cinemagoer@6.4.1 # Newer versions fail on processing 'tv special'
+python3 -m pip install psycopg2
+#ls -la ~/.local/bin/
+#cat ~/.local/bin/imdbpy
+psql_path=$(readlink -f "$(which psql)")
+LD_LIBRARY_PATH=$(dirname "$psql_path")/../lib
+export LD_LIBRARY_PATH
+
+#psql -d imdbload -c "CREATE TABLE title_extract(); CREATE TABLE title();" # The workaround to avoid:
+python3 ~/.local/bin/imdbpy2sql.py -d imdb  -u postgresql://postgres:postgres@localhost/imdbload
+# First bunch of records lost:
+#  * FLUSHING MoviesCache...
+# WARNING: MoviesCache; unknown exception caught committing the data
+# WARNING: to the database; report this as a bug, since
+# WARNING: many data (99999 items) were lost: current transaction is aborted, commands ignored until end of transaction block
+# due to
+# 2022-11-19 05:41:35.716 UTC [195] ERROR:  table "title_extract" does not exist
+# 2022-11-19 05:41:35.716 UTC [195] STATEMENT:  DROP TABLE title_extract
+# 2022-11-19 05:41:35.716 UTC [195] ERROR:  current transaction is aborted, commands ignored until end of transaction block
+
+mkdir export
+cat << 'EOF' | psql -d imdbload
+\copy aka_name to 'export/aka_name.csv' csv
+\copy aka_title to 'export/aka_title.csv' csv
+\copy cast_info to 'export/cast_info.csv' csv
+\copy char_name to 'export/char_name.csv' csv
+\copy comp_cast_type to 'export/comp_cast_type.csv' csv
+\copy company_name to 'export/company_name.csv' csv
+\copy company_type to 'export/company_type.csv' csv
+\copy complete_cast to 'export/complete_cast.csv' csv
+\copy info_type to 'export/info_type.csv' csv
+\copy keyword to 'export/keyword.csv' csv
+\copy kind_type to 'export/kind_type.csv' csv
+\copy link_type to 'export/link_type.csv' csv
+\copy movie_companies to 'export/movie_companies.csv' csv
+\copy movie_info to 'export/movie_info.csv' csv
+\copy movie_info_idx to 'export/movie_info_idx.csv' csv
+\copy movie_keyword to 'export/movie_keyword.csv' csv
+\copy movie_link to 'export/movie_link.csv' csv
+\copy name to 'export/name.csv' csv
+\copy person_info to 'export/person_info.csv' csv
+\copy role_type to 'export/role_type.csv' csv
+\copy title to 'export/title.csv' csv
+EOF
+
+ls resources/job/
+time psql -d imdbload -f resources/job/3a.sql

@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+HD="$(pwd)"
+cd gdprbench/src
+
+echo "CLASSPATH=$(ls /usr/share/java/postgres*.jar)" >./bin/setenv.sh
+
+for wl in gdpr_controller gdpr_customer gdpr_processor; do
+
+    dropdb gdpr || true
+    createdb gdpr
+
+    psql gdpr -f jdbc/src/main/resources/sql/create_table.sql
+
+    ./bin/ycsb.sh load jdbc -s \
+     -P workloads/$wl -P /tmp/postgres.properties \
+     | sed -e "s/^/load_$wl: /" >>"$HD/results/gdpr-run.log"
+
+    ./bin/ycsb.sh run jdbc \
+     -P workloads/$wl -P /tmp/postgres.properties \
+     | sed -e "s/^/run_$wl: /" >>"$HD/results/gdpr-run.log"
+done

@@ -1,0 +1,25 @@
+#!/bin/bash
+
+set -e
+
+# Based on https://blog.pgaddict.com/file/tpcds-tooling.tgz / run-tpcds.sh
+
+# number of pre-generated SQL scripts
+QUERYDIR=resources/tpcds-tooling/queries-compat
+#QUERIES=1
+# timeout (1h by default)
+TIMEOUT=3600000
+
+cat << EOF | psql tpcds > results/query_0.log 2>&1
+\\o /dev/null
+\\timing
+set statement_timeout=$TIMEOUT;
+\\i src/tpcds/tools/query_0.sql
+EOF
+
+psql tpcds -f $QUERYDIR/explain.sql > results/explain.log 2>&1
+
+cat << EOF | psql tpcds > results/explain-analyze.log 2>&1
+set statement_timeout=$TIMEOUT;
+\i $QUERYDIR/explain-analyze.sql
+EOF

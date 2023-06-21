@@ -1,0 +1,102 @@
+FROM ubuntu
+ARG PG_VERSION
+ARG PHASE1_ACTION
+ARG PHASE2_ACTION
+ARG REPOSITORY
+ARG EXTRA_OS_PACKAGES
+ARG EXTRA_PG_MODULES
+ARG PG_PARAMETERS
+ARG CFG_OPTIONS
+
+ARG PGPRO_EDN
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install a common set of packages needed for tests
+#  There are some warnings (in red) that show up during the build. You can hide
+#  them by prefixing each apt statement with DEBIAN_FRONTEND=noninteractive
+RUN p=$EXTRA_OS_PACKAGES; p="${p%\"}";p="${p#\"}"; \
+    apt update && apt install -y $p python3 python3-dev python3-pip \
+    software-properties-common wget vim time pkg-config locales recode \
+    git gcc make libreadline-dev zlib1g-dev libicu-dev bison flex gettext \
+    openjdk-17-jdk maven
+
+RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+ENV LANG en_US.UTF-8
+ENV LC_ALL en_US.UTF-8
+
+COPY ./$PHASE1_ACTION /bin/
+RUN $PHASE1_ACTION
+
+RUN echo $REPOSITORY
+RUN echo `echo $REPOSITORY | sed 's|^\([^/]*//[^/]*/[^/]*\).*|\1|'`
+
+# Add the Postgres PRO PGP key to verify the Debian packages.
+# http://repo.postgrespro.ru/std-15/ubuntu $OS_CODENAME main -> http://repo.postgrespro.ru/std-$PG_VERSION/keys/GPG-KEY-POSTGRESPRO
+RUN wget --quiet -O - `echo $REPOSITORY | sed 's|^\([^/]*//[^/]*/[^/]*\).*|\1|'`/keys/GPG-KEY-POSTGRESPRO | apt-key add -
+
+# Add Postgres Pro's repository.
+RUN echo "deb $REPOSITORY" | sed s/\$OS_CODENAME/$(lsb_release -cs)/ > /etc/apt/sources.list.d/postgrespro.list
+
+# Install Postgres Pro
+#  There are some warnings (in red) that show up during the build. You can hide
+#  them by prefixing each apt statement with DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y postgrespro-$PGPRO_EDN-$PG_VERSION postgrespro-$PGPRO_EDN-$PG_VERSION-server postgrespro-$PGPRO_EDN-$PG_VERSION-contrib
+
+WORKDIR /home/postgres
+
+ADD postgres-pgbench.tar.gz /home/postgres/src/postgres-pgbench
+RUN chown -R postgres:postgres /home/postgres/
+
+# Setup jdbc driver
+RUN JAVA_VERSION=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}'); \
+    case "$JAVA_VERSION" in \
+        1\.6* ) jdbcjar="https://jdbc.postgresql.org/download/postgresql-42.2.12.jre6.jar" ;; \
+        1\.7* ) jdbcjar="https://jdbc.postgresql.org/download/postgresql-42.2.12.jre7.jar" ;; \
+        *) jdbcjar="https://jdbc.postgresql.org/download/postgresql-42.2.12.jar" ;; \
+    esac; \
+    [ -z "$jdbcjar" ] || wget --no-verbose "$jdbcjar" -P /usr/share/java
+
+RUN rm -rf /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data
+
+RUN /opt/pgpro/$PGPRO_EDN-$PG_VERSION/bin/pg-setup initdb
+
+COPY ./$PHASE2_ACTION /bin/
+RUN $PHASE2_ACTION
+
+RUN touch /home/postgres/extra.conf && printf "\nlisten_addresses='*'\n"\
+"logging_collector = on\n"\
+"fsync = off\n"\
+"max_connections = 500\n"\
+"include '/home/postgres/extra.conf'\n" >> /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/postgresql.conf
+RUN m=$EXTRA_PG_MODULES; m="${m%\"}";m="${m#\"}"; \
+    [ ! -z "$m" ] || printf "\nshared_preload_libraries = '"$m"'\n" >> /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/postgresql.conf
+RUN p=$PG_PARAMETERS; p="${p%\"}"; p="${p#\"}"; \
+    [ -z "$p" ] || printf "\n$p\n" >> /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/postgresql.conf
+
+RUN sed -i -e 's/^\(host\s\+all\s\+all\s\+127\.0\.0\.1\/32\)/#\1/' \
+           -e 's/^\(host\s\+all\s\+all\s\+::1\/128\)/#\1/' /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/pg_hba.conf; \
+printf "\n"\
+"host    all             all             127.0.0.1/32          trust\n"\
+"host    all             all                0.0.0.0/0            md5\n"\
+"host    all             all                  ::1/128          trust\n" >> /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/pg_hba.conf
+
+RUN echo "/opt/pgpro/$PGPRO_EDN-$PG_VERSION/bin/postgres -D /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data -c config_file=/var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/postgresql.conf" >/usr/bin/pgmain && chmod a+x /usr/bin/pgmain
+
+# Run the rest of the commands as the ``postgres`` user created by the ``postgres*-$version`` package when it was ``apt installed``
+USER postgres
+
+RUN /opt/pgpro/$PGPRO_EDN-$PG_VERSION/bin/pg_ctl start -D /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data -w && \
+    psql -c "CREATE USER tester WITH SUPERUSER PASSWORD 'tester'; ALTER user postgres password 'pgpass';"
+
+COPY ./setup-reference-pgbench /tmp/
+RUN /tmp/setup-reference-pgbench $PG_VERSION
+
+# Expose the PostgreSQL port
+EXPOSE 5432
+
+# Add VOLUMEs to allow backup of config, logs and databases
+VOLUME  ["/var/lib/pgpro"]
+
+# Set the default command to run when starting the container
+CMD /usr/bin/pgmain

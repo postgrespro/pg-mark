@@ -1,0 +1,407 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config xmlns:xi="http://www.w3.org/2001/XInclude">
+    <settings>
+        <default>
+            <os distr="ubuntu" version="22.04" />
+            <repository id="pgsql" />
+            <git path="postgres.git" />
+        </default>
+        <repositories>
+            <repository id="pgsql" url="http://apt.postgresql.org/pub/repos/apt $OS_CODENAME-pgdg main" />
+            <repository id="pgsql-16beta" url="http://apt.postgresql.org/pub/repos/apt $OS_CODENAME-pgdg-testing main 16" />
+            <repository id="pgpro" url="http://repo.postgrespro.ru/$PGPRO_EDN-$PG_VERSION/ubuntu $OS_CODENAME main" />
+            <xi:include href="private_repositories.xml" />
+        </repositories>
+    </settings>
+
+    <pg_instances>
+        <instance id="pg-apt-9.0" type="pgapt" pg_version="9.0" />
+        <instance id="pg-src-9.6.10" type="src" pg_version="9.6.10" git_commit="REL9_6_10" cfg_options="--enable-nls" />
+        <instance id="pg-apt-15" type="pgapt" pg_version="15" />
+        <instance id="pg-apt-16beta" type="pgapt" pg_version="16" repository="pgsql-16beta" />
+        <instance id="pg-pro-apt-15" type="proapt" pg_version="15" pgpro_edition="std" repository="pgpro">
+            <config>
+                <pg_param name="custom.parameter1" value="1"/>
+                <pg_param name="custom.parameter2" value="2"/>
+                <envvar name="custom_var" value="val"/>
+            </config>
+        </instance>
+        <instance id="pg-pro-apt-15-lunar" type="proapt" pg_version="15" pgpro_edition="std" repository="pgpro">
+            <os version="23.04" />
+        </instance>
+        <xi:include href="private_instances.xml" />
+        <instance id="pg-src-15" type="src" pg_version="15devel" git_branch="REL_15_STABLE" />
+        <instance id="pg-src-master" type="src" pg_version="16devel" git_branch="master" />
+    </pg_instances>
+
+    <benchmarks>
+        <benchmark id="version">
+            <execute>
+<![CDATA[
+sleep 3;
+psql -c 'SHOW ALL' >results/params.txt
+psql -t -P pager=off -c 'SELECT version()' >results/version.txt 2>&1 && cat results/version.txt
+]]>
+            </execute>
+            <results>
+                <metric id="version" regexp="\s*(.*)" type="string" />
+            </results>
+        </benchmark>
+        <benchmark id="pgbench_native">
+            <prepare>
+<![CDATA[
+createdb benchdb && pgbench -i benchdb >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+pgbench -c 10 -T 300 benchdb >results/pgbench.log 2>&1 && cat results/pgbench.log
+]]>
+            </execute>
+            <results>
+                <metric id="tps" regexp="tps = ([0-9.]+) \((excluding connections establishing|without initial connection time)\)"/>
+            </results>
+        </benchmark>
+
+        <benchmark id="pgbench_reference">
+            <prepare>
+<![CDATA[
+createdb benchdb && ./ref_pgbench -i benchdb >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+./ref_pgbench -c 64 -j 4 -T 300 benchdb >results/pgbench.log 2>&1 && cat results/pgbench.log
+]]>
+            </execute>
+            <results>
+                <metric id="latency_avg" regexp="latency average = ([0-9.]+) ms"/>
+                <metric id="tps1" regexp="tps = ([0-9.]+) \(including connections establishing\)"/>
+                <metric id="tps2" regexp="tps = ([0-9.]+) \(excluding connections establishing\)"/>
+            </results>
+        </benchmark>
+
+        <benchmark id="pg_tpch">
+            <prerequisites>
+                <zip url="#https://www.tpc.org/TPC_Documents_Current_Versions/download_programs/tools-download-request5.asp?bm_type=TPC-H" target_dir="resources/tpch" />
+                <git url="https://github.com/tvondra/pg_tpch" target_dir="resources/pg_tpch" />
+            </prerequisites>
+            <prepare>
+<!-- # First argument is 'scale' for db_gen - roughly equals to number of GB of raw data -->
+<![CDATA[
+scripts/tpch/prepare 1 >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+cd src/pg_tpch && bash tpch.sh ../../results tpch-db postgres >../../results/tpsh.log 2>&1 && cd ../.. && cat results/results.log
+]]>
+            </execute>
+            <results>
+                <metricset id="query$1" regexp="(\d+) = ([0-9.]+)" />
+            </results>
+        </benchmark>
+
+        <benchmark id="pg_tpcds">
+            <prerequisites>
+                <zip url="#https://www.tpc.org/TPC_Documents_Current_Versions/download_programs/tools-download-request5.asp?bm_type=TPC-DS" target_dir="resources/tpcds" />
+                <!-- http://www.tpc.org/tpc_documents_current_versions/download_programs/tools-download-files.asp?bm_type=&original_filename=TPC-DS_Tools_v2.4.0.zip&type=Tool%20%20&download_key=xxxx -->
+
+                <tar url="https://web.archive.org/web/20160319065040/http://blog.pgaddict.com/file/tpcds-tooling.tgz" target_dir="resources/tpcds-tooling" />
+                <!-- https://web.archive.org/web/20200615204853/http://blog.pgaddict.com:80/posts/performance-since-postgresql-7-4-to-9-4-tpc-ds -->
+            </prerequisites>
+            <prepare>
+<![CDATA[
+# First argument is 'scale' - roughly equals to number of GB of raw data
+scripts/tpcds/prepare 2 >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+scripts/tpcds/run >results/run.log 2>&1 && cat results/sizes.log && cat results/times.log && cat results/query_0.log
+]]>
+            </execute>
+            <results>
+                <metric id="load_size" regexp="LOAD SIZE:\s+([0-9]+)" />
+                <metric id="indexes_size" regexp="INDEXES SIZE:\s+([0-9]+)" />
+                <metric id="vacuum_full_size" regexp="VACUUM FULL SIZE:\s+([0-9]+)" />
+                <metric id="vacuum_freeze_size" regexp="VACUUM FREEZE SIZE:\s+([0-9]+)" />
+
+                <metric id="load_time" regexp="LOAD TIME:\s+([0-9.]+)" />
+                <metric id="indexes_time" regexp="INDEXES TIME:\s+([0-9.]+)" />
+                <metric id="vacuum_full_time" regexp="VACUUM FULL TIME:\s+([0-9.]+)" />
+                <metric id="vacuum_freeze_time" regexp="VACUUM FREEZE TIME:\s+([0-9.]+)" />
+                <metric id="analyze_time" regexp="ANALYZE TIME:\s+([0-9.]+)" />
+
+                <metricset id="query$1" regexp=">>query(\d+)\.tpl;[\r\n]+Time: ([0-9.]+) ms" />
+            </results>
+        </benchmark>
+
+        <benchmark id="ycsb">
+            <prerequisites>
+                <tar url="https://github.com/brianfrankcooper/YCSB/releases/download/0.17.0/ycsb-jdbc-binding-0.17.0.tar.gz" target_dir="resources/YCSB" />
+            </prerequisites>
+            <execute>
+<![CDATA[
+# Arguments: RECORDCOUNT OPERATIONCOUNT 'WORKLOADS LIST' 'THREADS LIST'
+scripts/ycsb/run 1000000 1000000 'a b c d f' '10 25 50' >results/run.log 2>&1 && cat results/ycsb-run.log
+]]>
+            </execute>
+            <results>
+                <metricset id="load_$1_size" regexp="LOAD (\w) SIZE: ([0-9]+)" />
+                <metricset id="load_$1_time" regexp="LOAD (\w) TIME: ([0-9.]+)" />
+                <metricset id="load_$1_$2_runtime" regexp=">>load (\w) (\d+)[\r\n]+\[OVERALL\], RunTime\(ms\), ([0-9.]+)"/>
+                <metricset id="load_$1_$2_ops" regexp=">>load (\w) (\d+)[\r\n]+\[OVERALL\][^\r\n]+[\r\n]+\[OVERALL\], Throughput\(ops/sec\), ([0-9.]+)"/>
+            </results>
+        </benchmark>
+
+        <benchmark id="benchmarksql_tpcc">
+            <prerequisites>
+                <zip url="https://downloads.sourceforge.net/project/benchmarksql/benchmarksql-5.0.zip" target_dir="resources/benchmarksql"
+                     setup="scripts/benchmarksql/compile" />
+            </prerequisites>
+            <prepare>
+<![CDATA[
+scripts/benchmarksql/prepare >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+scripts/benchmarksql/run >results/run.log 2>&1 && cat results/run.log
+]]>
+            </execute>
+            <results>
+                <metric id="tpm_total" regexp="Measured tpmTOTAL = ([0-9]+)" />
+                <metric id="xacts" regexp="Transaction Count = ([0-9]+)" />
+                <metric id="data_size" regexp="DATA SIZE: ([0-9]+)" />
+            </results>
+        </benchmark>
+
+        <benchmark id="htapbench" disabled="true">
+            <prerequisites>
+                <git url="https://github.com/faclc4/HTAPBench.git" target_dir="resources/htapbench" />
+            </prerequisites>
+            <prepare>
+<![CDATA[
+scripts/htapbench/prepare 120 >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+(cd htapbench && java -cp .:target/htapbench-0.95-jar-with-dependencies.jar pt.haslab.htapbench.core.HTAPBench -b htapb -c config/htapb_config_postgres.xml --create false --load false --execute true --s 120 --calibrate false) >results/run.log 2>&1 && cat results/run.log
+]]>
+            </execute>
+            <results>
+                <metric id="tpcc_rps" regexp="TPCC Results:\n[^\n]*\n[^\n]*\n[^\n]*\nResults\([^)]*\)\s*=\s*([0-9.]+)" />
+                <metric id="tpch_rps" regexp="TPCH Results:\n[^\n]*\n[^\n]*\n[^\n]*\nResults\([^)]*\)\s*=\s*([0-9.]+)" />
+                <metric id="cb_rps" regexp="CLIENT BALANCER Results:\n[^\n]*\n[^\n]*\n[^\n]*\nResults\([^)]*\)\s*=\s*([0-9.]+)" />
+            </results>
+        </benchmark>
+
+        <benchmark id="benchbase">
+            <prerequisites>
+                <tar url="https://github.com/cmu-db/benchbase/archive/12e3acc56.tar.gz" target_dir="resources/benchbase" />
+            </prerequisites>
+            <config>
+                <pg_param name="max_pred_locks_per_transaction" value= "8192"/> <!-- needed for the benchmark otmetrics -->
+            </config>
+            <prepare>
+<![CDATA[
+scripts/benchbase/prepare 5 10 120 >results/prepare.log 2>&1 # Arguments: scalefactor terminals time
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+(
+set -o pipefail && cd benchbase/benchbase-postgres;
+# chbenchmark broken as of 12e3acc56 (https://github.com/cmu-db/benchbase/issues/318)
+# wikipedia produces thousands of errors "could not serialize access ..."
+for b in auctionmark epinions hyadapt otmetrics resourcestresser seats sibench smallbank tatp tpcc tpch twitter voter ycsb; do
+echo "Becnhmark \$b.";
+java -jar benchbase.jar -b \$b -c config/postgres/"\$b"_config.xml - -create true - -load true - -execute true | sed -e "s/^/\$b: /" || exit 1;
+done
+) >results/run.log 2>&1 && rm benchbase/benchbase-postgres/results/*.raw.csv && cp benchbase/benchbase-postgres/results/* results/ && cat results/run.log
+]]>
+            </execute>
+            <results>
+                <metric id="auctionmark_rps" regexp="^auctionmark: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="epinions_rps" regexp="^epinions: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="hyadapt_rps" regexp="^hyadapt: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="otmetrics_rps" regexp="^otmetrics: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="resourcestresser_rps" regexp="^resourcestresser: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="seats_rps" regexp="^seats: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="sibench_rps" regexp="^sibench: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="smallbank_rps" regexp="^smallbank: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="tatp_rps" regexp="^tatp: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="tpcc_rps" regexp="^tpcc: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="tpch_rps" regexp="^tpch: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="twitter_rps" regexp="^twitter: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="voter_rps" regexp="^voter: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+                <metric id="ycsb_rps" regexp="^ycsb: .*Results\([^)]*\)\s*=\s*([0-9.]+)\s+requests/sec \(throughput\)" />
+            </results>
+        </benchmark>
+
+        <benchmark id="gdprbench">
+            <prerequisites>
+                <git url="https://github.com/GDPRbench/GDPRbench" target_dir="resources/gdprbench" />
+            </prerequisites>
+            <prepare>
+<![CDATA[
+scripts/gdprbench/prepare >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+scripts/gdprbench/run >results/run.log 2>&1 && cat results/gdpr-run.log
+]]>
+            </execute>
+            <results>
+                <metric id="load_controller_ops" regexp="load_gdpr_controller: \[OVERALL\], Throughput\(ops/sec\),\s*([0-9.]+)"/>
+                <metric id="run_controller_ops" regexp="run_gdpr_controller: \[OVERALL\], Throughput\(ops/sec\),\s*([0-9.]+)"/>
+                <metric id="load_customer_ops" regexp="load_gdpr_customer: \[OVERALL\], Throughput\(ops/sec\),\s*([0-9.]+)"/>
+                <metric id="run_customer_ops" regexp="run_gdpr_customer: \[OVERALL\], Throughput\(ops/sec\),\s*([0-9.]+)"/>
+                <metric id="load_processor_ops" regexp="load_gdpr_processor: \[OVERALL\], Throughput\(ops/sec\),\s*([0-9.]+)"/>
+                <metric id="run_processor_ops" regexp="run_gdpr_processor: \[OVERALL\], Throughput\(ops/sec\),\s*([0-9.]+)"/>
+            </results>
+        </benchmark>
+
+        <benchmark id="s64da_tpch">
+            <prerequisites>
+                <git url="https://github.com/swarm64/s64da-benchmark-toolkit --branch v5.7.0" target_dir="resources/s64da-benchmark" />
+            </prerequisites>
+            <prepare>
+<![CDATA[
+cp -r resources/s64da-benchmark ./; scripts/s64da/update-requirements.sh
+(
+cd s64da-benchmark;
+psql -c "select 1 from pg_stats_ext limit 1" 1>/dev/null 2>&1 || \
+  sed "s/CREATE STATISTICS/-- CREATE STATISTICS/" -i benchmarks/tpch/schemas/psql_native/schema.sql
+python3 -m pip install -r requirements.txt && \
+./prepare_benchmark \
+    --dsn=postgresql://postgres@localhost/tpch \
+    --benchmark=tpch \
+    --schema=psql_native \
+    --scale-factor=5) >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+(cd s64da-benchmark
+./run_benchmark --dsn postgresql://postgres@localhost/tpch tpch) >results/run.log 2>&1
+cat results/run.log
+]]>
+            </execute>
+            <results>
+                <metricset id="query$1" regexp="\|[^|]+\|[^|]+\|\s*([0-9]+)\s*\|[^|]+\|[^|]+\|\s*([0-9.]+)\s*\|\s*OK\s*\|" />
+                <metric id="total" regexp="Total benchmark time[^(]+\(([0-9.]+)s\)" />
+            </results>
+        </benchmark>
+
+        <benchmark id="s64da_tpcds">
+            <prerequisites>
+                <git url="https://github.com/swarm64/s64da-benchmark-toolkit --branch v5.7.0" target_dir="resources/s64da-benchmark" />
+            </prerequisites>
+            <prepare>
+<![CDATA[
+cp -r resources/s64da-benchmark ./; scripts/s64da/update-requirements.sh
+(
+cd s64da-benchmark
+python3 -m pip install -r requirements.txt &&
+./prepare_benchmark \
+    --dsn=postgresql://postgres@localhost/tpcds \
+    --benchmark=tpcds \
+    --schema=psql_native \
+    --scale-factor=2) >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+(
+cd s64da-benchmark
+printf "timeout: 30min\nignore:\n  - 4\n  - 10\n  - 11\n  - 77\n" >/tmp/tpcds.config # disable very slow tests
+./run_benchmark --dsn postgresql://postgres@localhost/tpcds tpcds --scale-factor=10 --config /tmp/tpcds.config) >results/run.log 2>&1
+cat results/run.log
+]]>
+            </execute>
+            <results>
+                <metricset id="query$1" regexp="\|[^|]+\|[^|]+\|\s*([0-9a-z]+)\s*\|[^|]+\|[^|]+\|\s*([0-9.]+)\s*\|\s*OK\s*\|" />
+<!-- Ignored tests are counted as having duration TIMEOUT and added to Total benchmark time, so select the query runtime -->
+                <metric id="total" regexp="Query runtime \(OK \+ ERR\):[^(]+\(([0-9.]+)s\)" />
+            </results>
+        </benchmark>
+
+        <benchmark id="s64da_ssb">
+            <prerequisites>
+                <git url="https://github.com/swarm64/s64da-benchmark-toolkit --branch v5.7.0" target_dir="resources/s64da-benchmark" />
+            </prerequisites>
+            <prepare>
+<![CDATA[
+cp -r resources/s64da-benchmark ./; scripts/s64da/update-requirements.sh
+(cd s64da-benchmark
+psql -c "select 1 from pg_stats_ext limit 1" 1>/dev/null 2>&1 || \
+  sed "s/CREATE STATISTICS/-- CREATE STATISTICS/" -i benchmarks/ssb/schemas/psql_native/schema.sql
+python3 -m pip install -r requirements.txt &&
+./prepare_benchmark \
+    --dsn=postgresql://postgres@localhost/ssb \
+    --benchmark=ssb \
+    --schema=psql_native \
+    --scale-factor=10) >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+(cd s64da-benchmark;
+./run_benchmark --dsn postgresql://postgres@localhost/ssb ssb --scale-factor=10) >results/run.log 2>&1
+cat results/run.log
+]]>
+            </execute>
+            <results>
+                <metricset id="query$1" regexp="\|[^|]+\|[^|]+\|\s*(Q[0-9.]+)\s*\|[^|]+\|[^|]+\|\s*([0-9.]+)\s*\|\s*OK\s*\|" />
+                <metric id="total" regexp="Total benchmark time[^(]+\(([0-9.]+)s\)" />
+            </results>
+        </benchmark>
+
+        <benchmark id="job">
+            <prerequisites>
+                <git url="https://github.com/gregrahn/join-order-benchmark.git" target_dir="resources/job" />
+                <zip url="https://oc.postgrespro.ru/index.php/s/Zo8kZiT8V8GJbvo/download" target_dir="resources/job-imdb" />
+            </prerequisites>
+            <prepare>
+<![CDATA[
+scripts/job/prepare >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+(
+cd resources/job/
+for s in *.sql; do
+[[ "\$s" == "fkindexes.sql" ]] || [[ "\$s" == "schema.sql" ]] && continue;
+printf "\$s\t";
+/usr/bin/time -f 'real time: %e' psql -d imdbload -f \$s -o ../../results/\$s.out
+sed "s/SELECT /EXPLAIN (ANALYZE, VERBOSE) SELECT /" \$s | psql -d imdbload -o ../../results/\$s.plan
+done
+) >results/run.log 2>&1; cat results/run.log
+]]>
+            </execute>
+            <results>
+                <metricset id="query$1" regexp="^([0-9a-z]+)\.sql\s+real time: ([0-9.]+)" />
+            </results>
+        </benchmark>
+
+        <benchmark id="insert-1m">
+            <execute>
+<![CDATA[
+echo "CREATE TABLE texts(id INT PRIMARY KEY, t TEXT);" | psql >results/run.log 2>&1 &&
+/usr/bin/time -f 'real %e' -o results/time.txt bash -c 'for (( c=1; c<=1000000; c++)) ; do echo "INSERT INTO texts VALUES(\$c, random()::text);" ; done | psql -q >>results/run.log 2>&1' &&
+echo "SELECT COUNT(1) FROM texts;" | psql >>results/run.log 2>&1 &&
+cat results/time.txt
+]]>
+            </execute>
+            <results>
+                <metric id="time" regexp="real\s+([0-9.]+)" type="string" />
+            </results>
+        </benchmark>
+
+    </benchmarks>
+</config>

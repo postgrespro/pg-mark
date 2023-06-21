@@ -1,0 +1,13 @@
+#!/bin/bash
+
+set -e
+
+dropdb timescale || true; createdb timescale
+if [ -f /usr/local/pgsql/share/extension/timescaledb.control ]; then
+  psql -d timescale -c 'CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE; SELECT setup_timescaledb();'
+  cp resources/weather_med/weather.sql /tmp/weather.sql
+else
+  sed resources/weather_med/weather.sql -e 's/\(SELECT create_hypertable\)/-- \1/' >/tmp/weather.sql
+fi
+psql -d timescale -f /tmp/weather.sql
+psql -d timescale -c "\COPY locations FROM resources/weather_med/weather_med_locations.csv WITH CSV"

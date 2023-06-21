@@ -1,0 +1,34 @@
+#!/bin/bash
+
+set -e
+
+SCALE=$1
+TERMINALS=$2
+TIME=$3
+[ -z "$SCALE" ] && SCALE=1
+[ -z "$TERMINALS" ] && TERMINALS=1
+[ -z "$TIME" ] && TIME=60
+
+psql -c "CREATE USER admin WITH SUPERUSER PASSWORD 'password'"
+createdb benchbase
+
+cp -r resources/benchbase/benchbase* benchbase
+cd benchbase
+
+MAVEN_OPTS=" -DskipTests=true -Dmaven.test.skip=true" ./mvnw clean package -P postgres
+tar fax target/benchbase-postgres.tgz
+for b in auctionmark chbenchmark epinions hyadapt otmetrics resourcestresser seats sibench smallbank tatp tpcc tpch twitter voter wikipedia ycsb; do
+   cp benchbase-postgres/config/postgres/sample_"$b"_config.xml benchbase-postgres/config/postgres/"$b"_config.xml
+   sed \
+    -e "s|<scalefactor>[^<]*</scalefactor>|<scalefactor>$SCALE</scalefactor>|" \
+    -e "s|<terminals>[^<]*</terminals>|<terminals>$TERMINALS</terminals>|" \
+    -e "s|<rate>[^<]*</rate>|<rate>unlimited</rate>|" \
+    -e "s|<time>[^<]*</time>|<time>$TIME</time>|" -i benchbase-postgres/config/postgres/"$b"_config.xml
+
+done
+SCALE_10=$(python3 -c "print($SCALE/10.)")
+# Use different scalefactor for the tests where default is 0.1
+sed -i \
+ -e "s|<scalefactor>[^<]*</scalefactor>|<scalefactor>$SCALE_10</scalefactor>|" \
+ benchbase-postgres/config/postgres/otmetrics_config.xml \
+ benchbase-postgres/config/postgres/tpch_config.xml

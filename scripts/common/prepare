@@ -1,0 +1,14 @@
+#!/bin/bash
+
+set -e
+
+DATADIR=$(psql -Aqt -c 'SHOW data_directory;')
+
+if [ "$CFS" == "Y" ]; then
+CFSDIR="$DATADIR/cfs"
+mkdir "$CFSDIR"
+echo "
+CREATE TABLESPACE cfs LOCATION '$CFSDIR' WITH (compression=true);
+ALTER ROLE postgres SET default_tablespace = cfs;
+" | psql -v ON_ERROR_STOP=1
+fi

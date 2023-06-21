@@ -1,0 +1,46 @@
+#!/bin/bash
+
+set -e
+
+SCALE=$1
+[ -z "$SCALE" ] && SCALE=1
+SD=$(pwd)
+mkdir src/tpch
+cp -r --preserve=timestamps resources/tpch/*/* src/tpch/
+cd src/tpch/dbgen
+sed -e 's/^CC\s*=\s*$/CC=gcc/' -e 's/^DATABASE\s*=\s*$/DATABASE=ORACLE/' -e 's/^MACHINE\s*=\s*$/MACHINE=LINUX/' -e 's/^WORKLOAD\s*=\s*/WORKLOAD=TPCH/' makefile.suite > Makefile
+make
+mkdir /var/lib/postgresql/tmp
+cp dbgen dists.dss /var/lib/postgresql/tmp/
+cd /var/lib/postgresql/tmp
+echo "Executing: dbgen -s $SCALE"
+./dbgen -s $SCALE
+rm -rf /var/lib/postgresql/tmp
+cd "$SD"
+cp -r resources/pg_tpch src/
+cp src/tpch/dbgen/qgen src/tpch/dbgen/dists.dss src/pg_tpch/
+cd src/pg_tpch
+mkdir dss/queries
+sed -i -e 's/^\(\s\+l_partkey\) agg_partkey,/\1 AS agg_partkey,/' -e 's/^\(\s\+l_suppkey\) agg_suppkey,/\1 AS agg_suppkey,/' dss/templates/20.sql
+sed -i -e "s/WITH (FORMAT csv, DELIMITER '|')/WITH CSV DELIMITER '|'/" dss/tpch-load.sql # For compatibility with 8.0
+sed -i -e 's/kill $p;/kill $p || true;/' tpch.sh # To prevent returning an error
+
+extra_queries=""
+
+cp tpch.sh "$SD/results/"
+cp dss/tpch-load.sql "$SD/results/"
+
+for q in $(seq 1 22)
+do
+    DSS_QUERY=dss/templates ./qgen -r 1 "$q" >> "dss/queries/$q.sql"
+done
+
+for q in $(seq 1 22) $extra_queries
+do
+    sed 's/^select/explain select/' "dss/queries/$q.sql" > "dss/queries/$q.explain.sql"
+    cat "dss/queries/$q.sql" >> "dss/queries/$q.explain.sql"
+done
+
+cp -r dss/queries/ "$SD/results/"
+
+createdb tpch-db

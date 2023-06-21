@@ -1,0 +1,8 @@
+docker-context
+private*.xml
+benchmark-results*
+*.tar.gz
+*.git
+resources/
+scripts/soft-reset
+!scripts/soft-reset.c
