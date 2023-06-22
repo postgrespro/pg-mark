@@ -6,7 +6,7 @@ This script runs benchmarks on Postgres instances
 as specified in a configuration file.
 """
 
-# pylint: disable=invalid-name
+# pylint: disable=invalid-name,broad-exception-raised
 
 # Requirements: docker, bash, wget, git, tar, 7z
 

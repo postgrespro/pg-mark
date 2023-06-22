@@ -79,6 +79,7 @@ def main(configfile, instances):
             #  Prepare source directory
             git_dir = config.find('./settings/default/git').get('path')
             if not os.path.exists(git_dir):
+                # pylint: disable=broad-exception-raised
                 raise Exception(f'Git directory ({git_dir}) not found'
                                 ' (check settings/default/git in config.xml)!')
             git_branch = instance.get('git_branch')
