@@ -1,0 +1,17 @@
+name: Extra checks
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Installing requirements
+      run: sudo apt install shellcheck libxml2-utils
+    - name: Analyzing scripts with ShellCheck
+      run: |
+        shellcheck scripts/*/*
+    - name: Analyzing config.xml with xmllint
+      run: |
+        xmllint --noout config.xml
