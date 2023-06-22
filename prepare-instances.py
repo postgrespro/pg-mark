@@ -193,12 +193,10 @@ def main(configfile, instances):
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument('-c', '--config', action='store',
-                            default='config.xml',
-                            help='configuration file')
+                            default='config.xml', help='configuration file')
     arg_parser.add_argument('-i', '--instance', nargs='+',
                             dest='instances', metavar='INSTANCE-ID',
-                            default=[],
-                            help='instance(s) to create')
+                            default=[], help='instance(s) to create')
 
     args = arg_parser.parse_args(sys.argv[1:])
     sys.exit(main(args.config, args.instances))
