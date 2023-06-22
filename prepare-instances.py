@@ -79,6 +79,7 @@ def main(configfile, instances):
             #  Prepare source directory
             git_dir = config.find('./settings/default/git').get('path')
             if not os.path.exists(git_dir):
+                # pylint: disable=broad-exception-raised
                 raise Exception(f'Git directory ({git_dir}) not found'
                                 ' (check settings/default/git in config.xml)!')
             git_branch = instance.get('git_branch')
@@ -193,12 +194,10 @@ def main(configfile, instances):
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument('-c', '--config', action='store',
-                            default='config.xml',
-                            help='configuration file')
+                            default='config.xml', help='configuration file')
     arg_parser.add_argument('-i', '--instance', nargs='+',
                             dest='instances', metavar='INSTANCE-ID',
-                            default=[],
-                            help='instance(s) to create')
+                            default=[], help='instance(s) to create')
 
     args = arg_parser.parse_args(sys.argv[1:])
     sys.exit(main(args.config, args.instances))
