@@ -75,7 +75,7 @@ def main(instances, resultsfile, percent, targetmetric, targetvalue):
                             metrics[metric_id][ipat] = []
                         value = float(metric.get('value'))
                         if metric_id.startswith(('tps', 'tpm', 'xacts')) or \
-                           metric_id.endswith(('_ops', '_rps')):
+                           metric_id.endswith(('_tps', '_ops', '_rps')):
                             value = -value
                         metrics[metric_id][ipat].append(value)
             if not inst_ipat:
