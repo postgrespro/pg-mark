@@ -16,7 +16,8 @@ Sample usage
 
 0) Prepare local git repository:
 
-    git clone git://git.postgresql.org/git/postgresql.git postgres.git
+       git clone git://git.postgresql.org/git/postgresql.git postgres.git
+
 And install prerequisites:
 docker, bash, wget, git, tar, 7z, ant, default-jdk  
 (optional packages for visualization: xsltproc, r-base-core, r-cran-xml,
@@ -26,7 +27,8 @@ r-cran-ggplot2, r-cran-reshape2)
 
 1) Run
 
-    ./prepare-instances.py
+       ./prepare-instances.py
+
 to get all the Postgres* instances defined in config.xml ready for
 benchmarking.
 
@@ -43,7 +45,7 @@ to get more information.
 
 2) Run
 
-    ./run-benchmarks.py
+        ./run-benchmarks.py
 to perform all the benchmarks Postgres* defined in config.xml for all
 instances.
 
@@ -70,7 +72,7 @@ to get more information.
 
 3) To visualize results, you can use:
 
-    R --no-save < VisualizeResults.R
+       R --no-save < VisualizeResults.R
 (You'll get Rplots.pdf with graphics presenting some benchmarks results.)
 Or
 
@@ -82,7 +84,7 @@ Or
 4) You can also compare benchmark results for several instances in an
 automated non-visual way. Run
 
-    ./analyze-benchmarks.py -i 'intance-1-pattern' 'intance-2-pattern'
+       ./analyze-benchmarks.py -i 'intance-1-pattern' 'intance-2-pattern'
 
 For example, to compare results of benchmarking instances shown above, run:
 
