@@ -389,6 +389,30 @@ done
             </results>
         </benchmark>
 
+        <benchmark id="sysbench">
+            <prepare>
+<![CDATA[
+createuser sbtest && createdb sbtest --owner=sbtest >results/prepare.log 2>&1
+]]>
+            </prepare>
+            <execute>
+<![CDATA[
+(for t in /usr/share/sysbench/*.lua; do
+tn=\$(basename \$t .lua);
+[[ "\$tn" == oltp_common ]] && continue;
+sysbench --db-driver=pgsql --threads=10 --table_size=100000 \$tn prepare &&
+sysbench --db-driver=pgsql --threads=10 --table_size=100000 --time=60 \$tn run | sed -e "s/^/\$tn: /" &&
+sysbench --db-driver=pgsql --threads=10 \$tn cleanup;
+done
+) >results/run.log 2>&1; cat results/run.log
+]]>
+            </execute>
+            <results>
+                <metricset id="load_$1_tps" regexp="^([a-z_]+):\s+transactions:\s+[0-9.]+\s+\(([0-9.]+) per sec\.\)" />
+                <metricset id="load_$1_ops" regexp="^([a-z_]+):\s+queries:\s+[0-9.]+\s+\(([0-9.]+) per sec\.\)" />
+            </results>
+        </benchmark>
+
         <benchmark id="insert-1m">
             <execute>
 <![CDATA[
