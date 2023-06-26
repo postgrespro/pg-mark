@@ -84,7 +84,7 @@ Or
 4) You can also compare benchmark results for several instances in an
 automated non-visual way. Run
 
-       ./analyze-benchmarks.py -i 'intance-1-pattern' 'intance-2-pattern'
+       ./analyze-benchmarks.py -i 'instance-1-pattern' 'instance-2-pattern'
 
 For example, to compare results of benchmarking instances shown above, run:
 
