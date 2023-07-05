@@ -15,6 +15,10 @@ cp dbgen dists.dss /var/lib/postgresql/tmp/
 cd /var/lib/postgresql/tmp
 echo "Executing: dbgen -s $SCALE"
 ./dbgen -s $SCALE
+DSS_DATA_DIR=/tmp/dss-data
+[ -d $DSS_DATA_DIR ] && rm -rf $DSS_DATA_DIR
+mkdir $DSS_DATA_DIR
+for i in ./*.tbl; do sed 's/|$//' "$i" > "$DSS_DATA_DIR/${i/tbl/csv}";  done;
 rm -rf /var/lib/postgresql/tmp
 cd "$SD"
 cp -r resources/pg_tpch src/
