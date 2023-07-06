@@ -89,7 +89,7 @@ createdb benchdb && ./ref_pgbench -i benchdb >results/prepare.log 2>&1
             <prepare>
 <!-- # First argument is 'scale' for db_gen - roughly equals to number of GB of raw data -->
 <![CDATA[
-scripts/tpch/prepare 1 >results/prepare.log 2>&1
+scripts/tpch/prepare 5 >results/prepare.log 2>&1
 ]]>
             </prepare>
             <execute>
