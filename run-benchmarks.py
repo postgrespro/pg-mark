@@ -106,6 +106,8 @@ def main(configfile, instances, benchmarks, resultsfile, resultsdir):
     insts = {}
     if not instances:
         for inst in config.findall('./pg_instances//instance'):
+            if inst.get('disabled') == 'true':
+                continue
             insts[inst.get('id')] = inst
     else:
         inst_cnts = {}
@@ -155,8 +157,6 @@ def main(configfile, instances, benchmarks, resultsfile, resultsdir):
         bmbench.set('id', bench_id)
         for instance_uid, instance in insts.items():
             instance_id = instance.get('id')
-            if instance.get('disabled') == 'true':
-                continue
 
             if re.match(r'^[\./]', instance_id):
                 raise Exception(f'Invalid image id: {instance_id}')
