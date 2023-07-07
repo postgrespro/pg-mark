@@ -249,7 +249,8 @@ def main(configfile, instances, benchmarks, resultsfile, resultsdir):
                                     'see benchmark-results/.)')
 
                 instance_features = instance.get('features')
-                if re.match(r'\bperf\b', instance_features):
+                if instance_features is not None and \
+                   re.match(r'\bperf\b', instance_features):
                     res = run(f'docker exec -t {container_id} bash -c '
                               f'pg_ctl_stop',
                               shell=True, check=False, stdout=subprocess.PIPE)
