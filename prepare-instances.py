@@ -142,6 +142,10 @@ def main(configfile, instances):
                   encoding='UTF-8') as dockerfile:
             dockerfile.write(df_contents)
 
+        if instance.get('features') is not None:
+            build_args += ["--build-arg",
+                           (f'FEATURES={instance.get("features")}')]
+
         if instance.get('pg_version') is not None:
             build_args += ['--build-arg',
                            (f'PG_VERSION={instance.get("pg_version")}')]

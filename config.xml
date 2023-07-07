@@ -30,6 +30,7 @@
             <os version="23.04" />
         </instance>
         <xi:include href="private_instances.xml" />
+        <instance id="pg-src-master-perf" disabled="true" type="src" features="perf" git_branch="master" />
         <instance id="pg-src-15" type="src" pg_version="15devel" git_branch="REL_15_STABLE" />
         <instance id="pg-src-master" type="src" pg_version="16devel" git_branch="master" />
     </pg_instances>
