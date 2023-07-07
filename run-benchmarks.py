@@ -106,6 +106,8 @@ def main(configfile, instances, benchmarks, resultsfile, resultsdir):
     insts = {}
     if not instances:
         for inst in config.findall('./pg_instances//instance'):
+            if inst.get('disabled') == 'true':
+                continue
             insts[inst.get('id')] = inst
     else:
         inst_cnts = {}
@@ -155,8 +157,6 @@ def main(configfile, instances, benchmarks, resultsfile, resultsdir):
         bmbench.set('id', bench_id)
         for instance_uid, instance in insts.items():
             instance_id = instance.get('id')
-            if instance.get('disabled') == 'true':
-                continue
 
             if re.match(r'^[\./]', instance_id):
                 raise Exception(f'Invalid image id: {instance_id}')
@@ -188,7 +188,7 @@ def main(configfile, instances, benchmarks, resultsfile, resultsdir):
                       f'-v {os.getcwd()}/resources:/home/postgres/resources '
                       f'-v {os.getcwd()}/scripts:/home/postgres/scripts '
                       f'-v {resultdir}:/home/postgres/results '
-                      f'--tty --cap-add=SYS_PTRACE '
+                      f'--tty --cap-add=SYS_PTRACE --cap-add=SYS_ADMIN '
                       f'--shm-size=2g {envvars} {instance_id}',
                       shell=True, check=True, stdout=subprocess.PIPE)
             container_id = res.stdout.decode('utf-8').strip()
@@ -247,6 +247,28 @@ def main(configfile, instances, benchmarks, resultsfile, resultsdir):
                     print(output)
                     raise Exception('Benchmark execution failed! (For details '
                                     'see benchmark-results/.)')
+
+                instance_features = instance.get('features')
+                if re.match(r'\bperf\b', instance_features):
+                    res = run(f'docker exec -t {container_id} bash -c '
+                              f'pg_ctl_stop',
+                              shell=True, check=False, stdout=subprocess.PIPE)
+                    if res.returncode != 0:
+                        print(res.stdout.decode('utf-8'))
+                        raise Exception('Could not stop server.')
+                    sleep(10)
+                    res = run(f'docker exec -t {container_id} bash -c "'
+                              f'perf report --stdio -i'
+                              f' /home/postgres/results/perf.data'
+                              f' >/home/postgres/results/perf.out 2>&1; '
+                              f'perf script -i'
+                              f' /home/postgres/results/perf.data'
+                              f' >/home/postgres/results/perf.script 2>&1"',
+                              shell=True, check=False, stdout=subprocess.PIPE)
+                    if res.returncode != 0:
+                        print(res.stdout.decode('utf-8'))
+                        raise Exception('Could not get perf report.')
+
                 for metric in bench.findall('./results/metric'):
                     mid = metric.get('id')
                     mre = metric.get('regexp')

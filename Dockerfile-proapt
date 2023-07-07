@@ -1,4 +1,5 @@
 FROM ubuntu
+ARG FEATURES
 ARG PG_VERSION
 ARG PHASE1_ACTION
 ARG PHASE2_ACTION
@@ -20,6 +21,8 @@ RUN p=$EXTRA_OS_PACKAGES; p="${p%\"}";p="${p#\"}"; \
     software-properties-common wget vim time pkg-config locales recode \
     git gcc make libreadline-dev zlib1g-dev libicu-dev bison flex gettext \
     openjdk-17-jdk maven sysbench
+
+RUN if (echo "$FEATURES" | grep -Eq "\bperf\b"); then apt install -y linux-tools-common linux-tools-`uname -r`; fi
 
 RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 ENV LANG en_US.UTF-8
@@ -81,7 +84,12 @@ printf "\n"\
 "host    all             all                0.0.0.0/0            md5\n"\
 "host    all             all                  ::1/128          trust\n" >> /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/pg_hba.conf
 
-RUN echo "/opt/pgpro/$PGPRO_EDN-$PG_VERSION/bin/postgres -D /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data -c config_file=/var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/postgresql.conf" >/usr/bin/pgmain && chmod a+x /usr/bin/pgmain
+RUN if (echo "$FEATURES" | grep -Eq "\bperf\b"); then \
+        echo "perf record -o /home/postgres/results/perf.data --call-graph dwarf -- /opt/pgpro/$PGPRO_EDN-$PG_VERSION/bin/postgres -D /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data -c config_file=/var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/postgresql.conf >/home/postgres/results/perf.log 2>&1; sleep inf" >/usr/bin/pgmain && chmod a+x /usr/bin/pgmain; \
+        echo "/opt/pgpro/$PGPRO_EDN-$PG_VERSION/bin/pg_ctl -w -D /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data stop" >/usr/bin/pg_ctl_stop && chmod a+x /usr/bin/pg_ctl_stop; \
+    else \
+        echo "/opt/pgpro/$PGPRO_EDN-$PG_VERSION/bin/postgres -D /var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data -c config_file=/var/lib/pgpro/$PGPRO_EDN-$PG_VERSION/data/postgresql.conf" >/usr/bin/pgmain && chmod a+x /usr/bin/pgmain; \
+    fi
 
 # Run the rest of the commands as the ``postgres`` user created by the ``postgres*-$version`` package when it was ``apt installed``
 USER postgres

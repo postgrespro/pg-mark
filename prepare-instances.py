@@ -142,12 +142,16 @@ def main(configfile, instances):
                   encoding='UTF-8') as dockerfile:
             dockerfile.write(df_contents)
 
+        if instance.get('features') is not None:
+            build_args += ["--build-arg",
+                           (f'FEATURES={instance.get("features")}')]
+
         if instance.get('pg_version') is not None:
-            build_args += ['--build-arg', ('PG_VERSION=' +
-                                           instance.get('pg_version'))]
+            build_args += ['--build-arg',
+                           (f'PG_VERSION={instance.get("pg_version")}')]
         if instance.get('pgpro_edition') is not None:
-            build_args += ['--build-arg', ('PGPRO_EDN=' +
-                                           instance.get('pgpro_edition'))]
+            build_args += ['--build-arg',
+                           (f'PGPRO_EDN={instance.get("pgpro_edition")}')]
         pg_params = ''
         for param in instance.findall('config/pg_param'):
             pg_params += f"{param.get('name')} = '{param.get('value')}'\\n"
@@ -157,15 +161,15 @@ def main(configfile, instances):
 
         repo_url = get_repo_url(instance)
         if repo_url is not None:
-            build_args += ['--build-arg', ('REPOSITORY=' + repo_url)]
+            build_args += ['--build-arg', (f'REPOSITORY={repo_url}')]
 
         extra = instance.find('extra')
         if extra is not None:
             if extra.find('source') is not None and \
                extra.find('source').get('type') == 'git':
                 extra_git_url = extra.find('source').get('url')
-                build_args += ['--build-arg', ('EXTRA_SRC_GIT=' +
-                                               extra_git_url)]
+                build_args += ['--build-arg',
+                               (f'EXTRA_SRC_GIT={extra_git_url}')]
             pg_modules = ''
             for pgm in extra.findall('pg_module'):
                 pg_modules += (',' if pg_modules else '') + pgm.get('name')
@@ -182,8 +186,8 @@ def main(configfile, instances):
                 phase2_action = instance.find('os').get('phase2_action')
             if instance.find('os').get('extra_packages') is not None:
                 extra_os_packages = instance.find('os').get('extra_packages')
-        build_args += ['--build-arg', ('PHASE1_ACTION=' + phase1_action)]
-        build_args += ['--build-arg', ('PHASE2_ACTION=' + phase2_action)]
+        build_args += ['--build-arg', (f'PHASE1_ACTION={phase1_action}')]
+        build_args += ['--build-arg', (f'PHASE2_ACTION={phase2_action}')]
         build_args += ['--build-arg',
                        (f'EXTRA_OS_PACKAGES="{extra_os_packages}"')]
 
